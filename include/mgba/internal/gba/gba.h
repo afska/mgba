@@ -125,6 +125,13 @@ struct GBA {
 	bool debug;
 	char debugString[0x100];
 	GBADebugFlags debugFlags;
+
+	bool externalFsEnabled;
+	uint32_t externalFsFilename;
+	uint32_t externalFsOffset;
+	uint16_t externalFsSize;
+	uint32_t externalFsOutAddress;
+	bool externalFsOutSuccess;
 };
 
 struct GBACartridge {

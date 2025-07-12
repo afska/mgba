@@ -12,6 +12,81 @@
 
 mLOG_DEFINE_CATEGORY(GBA_IO, "GBA I/O", "gba.io");
 
+#include <mgba-util/string.h>
+#include <mgba-util/vfs.h>
+#include <mgba/core/core.h>
+
+static void _ReadExternalFile(struct GBA* gba) {
+	struct ARMCore* cpu = gba->cpu;
+	uint32_t filenamePtr = gba->externalFsFilename;
+	uint32_t offset = gba->externalFsOffset;
+	uint32_t size = gba->externalFsSize;
+	uint32_t destPtr = gba->externalFsOutAddress;
+
+	char filename[256];
+	int i;
+	for (i = 0; i < 255; i++) {
+		filename[i] = cpu->memory.load8(cpu, filenamePtr + i, 0);
+		if (filename[i] == '\0')
+			break;
+	}
+	filename[i] = '\0';
+
+	mLOG(GBA_IO, DEBUG,
+			 "ReadExternalFile: filename='%s', offset=%u, size=%u, dest=%08X",
+			 filename, offset, size, destPtr);
+
+	struct VFile* vf = VFileOpen(filename, O_RDONLY);
+	if (!vf) {
+		mLOG(GBA_IO, WARN, "ReadExternalFile: Failed to open file '%s'", filename);
+		gba->externalFsOutSuccess = false;
+		return;
+	}
+
+	if (destPtr == 0) {
+		uint32_t fileSize = (uint32_t)vf->size(vf);
+		mLOG(GBA_IO, DEBUG, "ReadExternalFile: File size reported (%u bytes)", fileSize);
+		gba->externalFsOutAddress = fileSize;
+		gba->externalFsOutSuccess = true;
+		vf->close(vf);
+		return;
+	}
+
+	if (offset > 0) {
+		if (vf->seek(vf, offset, SEEK_SET) < 0) {
+			mLOG(GBA_IO, WARN, "ReadExternalFile: Failed to seek to offset %u", offset);
+			vf->close(vf);
+			gba->externalFsOutSuccess = false;
+			return;
+		}
+	}
+
+	uint8_t buffer[64 * 1024];
+	uint32_t totalRead = 0;
+	while (size > 0 && totalRead < size) {
+		uint32_t toRead = size - totalRead;
+		if (toRead > sizeof(buffer)) {
+			toRead = sizeof(buffer);
+		}
+
+		ssize_t bytesRead = vf->read(vf, buffer, toRead);
+		if (bytesRead <= 0) {
+			break;
+		}
+
+		for (int j = 0; j < bytesRead; j++) {
+			cpu->memory.store8(cpu, destPtr + totalRead + j, buffer[j], 0);
+		}
+
+		totalRead += bytesRead;
+	}
+
+	vf->close(vf);
+	gba->externalFsSize = totalRead;
+	gba->externalFsOutSuccess = true;
+	mLOG(GBA_IO, DEBUG, "ReadExternalFile: Read %u bytes", totalRead);
+}
+
 const char* const GBAIORegisterNames[] = {
 	// Video
 	[GBA_REG(DISPCNT)] = "DISPCNT",
@@ -557,6 +632,34 @@ void GBAIOWrite(struct GBA* gba, uint32_t address, uint16_t value) {
 	case GBA_REG_DEBUG_ENABLE:
 		gba->debug = value == 0xC0DE;
 		return;
+	case GBA_REG_FS_ENABLE:
+		gba->externalFsEnabled = value == 0xF511;
+		return;
+	case GBA_REG_FS_FILENAME_LO:
+		gba->externalFsFilename = ((gba->externalFsFilename) & 0xffff0000) | value;
+		return;
+	case GBA_REG_FS_FILENAME_HI:
+		gba->externalFsFilename = ((gba->externalFsFilename) & 0x0000ffff) | (value << 16);
+		return;
+	case GBA_REG_FS_OFFSET_LO:
+		gba->externalFsOffset = ((gba->externalFsOffset) & 0xffff0000) | value;
+		return;
+	case GBA_REG_FS_OFFSET_HI:
+		gba->externalFsOffset = ((gba->externalFsOffset) & 0x0000ffff) | (value << 16);
+		return;
+	case GBA_REG_FS_SIZE:
+		gba->externalFsSize = value;
+		return;
+	case GBA_REG_FS_OUT_ADDRESS_LO:
+		gba->externalFsOutAddress = ((gba->externalFsOutAddress) & 0xffff0000) | value;
+		return;
+	case GBA_REG_FS_OUT_ADDRESS_HI:
+		gba->externalFsOutAddress = ((gba->externalFsOutAddress) & 0x0000ffff) | (value << 16);
+		return;
+	case GBA_REG_FS_OUT_SUCCESS:
+		gba->externalFsOutSuccess = false;
+		_ReadExternalFile(gba);
+		return;
 	case GBA_REG_DEBUG_FLAGS:
 		if (gba->debug) {
 			GBADebug(gba, value);
@@ -996,6 +1099,51 @@ uint16_t GBAIORead(struct GBA* gba, uint32_t address) {
 	case GBA_REG_DEBUG_ENABLE:
 		if (gba->debug) {
 			return 0x1DEA;
+		}
+		// Fall through
+	case GBA_REG_FS_ENABLE:
+		if (gba->externalFsEnabled) {
+			return 0x11F5;
+		}
+		// Fall through
+	case GBA_REG_FS_FILENAME_LO:
+		if (gba->externalFsEnabled) {
+			return gba->externalFsFilename & 0xffff;
+		}
+		// Fall through
+	case GBA_REG_FS_FILENAME_HI:
+		if (gba->externalFsEnabled) {
+			return gba->externalFsFilename >> 16;
+		}
+		// Fall through
+	case GBA_REG_FS_OFFSET_LO:
+		if (gba->externalFsEnabled) {
+			return gba->externalFsOffset & 0xffff;
+		}
+		// Fall through
+	case GBA_REG_FS_OFFSET_HI:
+		if (gba->externalFsEnabled) {
+			return gba->externalFsOffset >> 16;
+		}
+		// Fall through
+	case GBA_REG_FS_SIZE:
+		if (gba->externalFsEnabled) {
+			return gba->externalFsSize;
+		}
+		// Fall through
+	case GBA_REG_FS_OUT_ADDRESS_LO:
+		if (gba->externalFsEnabled) {
+			return gba->externalFsOutAddress & 0xffff;
+		}
+		// Fall through
+	case GBA_REG_FS_OUT_ADDRESS_HI:
+		if (gba->externalFsEnabled) {
+			return gba->externalFsOutAddress >> 16;
+		}
+		// Fall through
+	case GBA_REG_FS_OUT_SUCCESS:
+		if (gba->externalFsEnabled) {
+			return gba->externalFsOutSuccess;
 		}
 		// Fall through
 	default:

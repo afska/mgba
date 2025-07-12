@@ -1,3 +1,98 @@
+mGBA fork with filesystem support
+====
+
+This mGBA fork lets homebrew ROMs read files.
+
+- The games request **files**, not blocks. The emulator doesn't simulate a block device.
+- Maximum size per read operation is **65535**. Files can have any size.
+- Paths are based on the **working directory**, not the **ROM directory**.
+
+## Example usage on the GBA side
+
+```c
+#define REG_FS_ENABLE (*(volatile unsigned short*)0x4FFF800)
+#define REG_FS_FILENAME_LO (*(volatile unsigned short*)0x4FFF802)
+#define REG_FS_FILENAME_HI (*(volatile unsigned short*)0x4FFF804)
+#define REG_FS_OFFSET_LO (*(volatile unsigned short*)0x4FFF806)
+#define REG_FS_OFFSET_HI (*(volatile unsigned short*)0x4FFF808)
+#define REG_FS_SIZE (*(volatile unsigned short*)0x4FFF80A)
+#define REG_FS_OUT_ADDRESS_LO (*(volatile unsigned short*)0x4FFF80C)
+#define REG_FS_OUT_ADDRESS_HI (*(volatile unsigned short*)0x4FFF80E)
+#define REG_FS_OUT_SUCCESS (*(volatile unsigned short*)0x4FFF810)
+
+inline unsigned enableFS() {
+	REG_FS_ENABLE = 0xF511;
+	return REG_FS_ENABLE == 0x11F5;
+}
+
+inline int readFile(
+	const char* fileName,
+	unsigned offset,
+	unsigned short size,
+	unsigned char* dest
+) {
+	if (!enableFS())
+		return -1;
+
+	REG_FS_FILENAME_LO = (unsigned)fileName & 0xffff;
+	REG_FS_FILENAME_HI = (unsigned)fileName >> 16;
+	REG_FS_OFFSET_LO = offset & 0xffff;
+	REG_FS_OFFSET_HI = offset >> 16;
+	REG_FS_SIZE = size;
+	REG_FS_OUT_ADDRESS_LO = (unsigned)dest & 0xffff;
+	REG_FS_OUT_ADDRESS_HI = (unsigned)dest >> 16;
+	REG_FS_OUT_SUCCESS = 0; // (this write starts the read process)
+
+	// (returns the number of read bytes, or -1)
+	return REG_FS_OUT_SUCCESS == 1
+		? REG_FS_SIZE
+		: -1;
+}
+
+inline int getFileSize(const char* fileName) {
+	if (!enableFS())
+		return -1;
+
+	REG_FS_FILENAME_LO = (unsigned)fileName & 0xffff;
+	REG_FS_FILENAME_HI = (unsigned)fileName >> 16;
+	REG_FS_OFFSET_LO = 0;
+	REG_FS_OFFSET_HI = 0;
+	REG_FS_SIZE = 0;
+	REG_FS_OUT_ADDRESS_LO = 0; // (`address == 0` means "retrieve file size")
+	REG_FS_OUT_ADDRESS_HI = 0;
+	REG_FS_OUT_SUCCESS = 0;
+
+	return REG_FS_OUT_SUCCESS == 1
+		? (REG_FS_OUT_ADDRESS_HI << 16) | REG_FS_OUT_ADDRESS_LO
+		: -1;
+}
+```
+
+To read the first 100 bytes of a file:
+
+```cpp
+if (enableFs()) {
+	unsigned char bytes[100];
+	int readBytes = readFile("hello.txt", 0, 100, bytes);
+}
+```
+
+To retrieve the size of a file:
+
+```cpp
+if (enableFs()) {
+	int fileSize = getFileSize("hello.txt");
+}
+```
+
+## Compile
+
+```bash
+docker run --rm -it -v ${PWD}:/home/mgba/src mgba/windows:w64
+docker run --rm -it -v ${PWD}:/home/mgba/src mgba/appimage:x64
+docker run --rm -it -v ${PWD}:/home/mgba/src mgba/appimage:arm64
+```
+
 mGBA
 ====
 

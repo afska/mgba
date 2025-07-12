@@ -292,6 +292,13 @@ void GBAReset(struct ARMCore* cpu) {
 	gba->idleDetectionFailures = 0;
 
 	gba->debug = false;
+
+	gba->externalFsEnabled = false;
+	gba->externalFsFilename = 0;
+	gba->externalFsOffset = 0;
+	gba->externalFsSize = 0;
+	gba->externalFsOutAddress = 0;
+	gba->externalFsOutSuccess = false;
 	memset(gba->debugString, 0, sizeof(gba->debugString));
 
 
