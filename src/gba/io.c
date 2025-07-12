@@ -33,8 +33,8 @@ static void _ReadExternalFile(struct GBA* gba) {
 	filename[i] = '\0';
 
 	mLOG(GBA_IO, DEBUG,
-			 "ReadExternalFile: filename='%s', offset=%u, size=%u, dest=%08X",
-			 filename, offset, size, destPtr);
+		 "ReadExternalFile: filename='%s', offset=%u, size=%u, dest=%08X",
+		 filename, offset, size, destPtr);
 
 	struct VFile* vf = VFileOpen(filename, O_RDONLY);
 	if (!vf) {
@@ -74,8 +74,20 @@ static void _ReadExternalFile(struct GBA* gba) {
 			break;
 		}
 
-		for (int j = 0; j < bytesRead; j++) {
-			cpu->memory.store8(cpu, destPtr + totalRead + j, buffer[j], 0);
+		bool use16 = ((size % 2 == 0) && (((destPtr + totalRead) & 1) == 0));
+		if (use16) {
+			int j;
+			for (j = 0; j + 1 < bytesRead; j += 2) {
+				uint16_t val = buffer[j] | (buffer[j + 1] << 8);
+				cpu->memory.store16(cpu, destPtr + totalRead + j, val, 0);
+			}
+			if (j < bytesRead) {
+				cpu->memory.store8(cpu, destPtr + totalRead + j, buffer[j], 0);
+			}
+		} else {
+			for (int j = 0; j < bytesRead; j++) {
+				cpu->memory.store8(cpu, destPtr + totalRead + j, buffer[j], 0);
+			}
 		}
 
 		totalRead += bytesRead;
