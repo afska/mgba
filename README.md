@@ -71,7 +71,7 @@ inline int getFileSize(const char* fileName) {
 To read the first 100 bytes of a file:
 
 ```cpp
-if (enableFs()) {
+if (enableFS()) {
 	unsigned char bytes[100];
 	int readBytes = readFile("hello.txt", 0, 100, bytes);
 }
@@ -80,7 +80,7 @@ if (enableFs()) {
 To retrieve the size of a file:
 
 ```cpp
-if (enableFs()) {
+if (enableFS()) {
 	int fileSize = getFileSize("hello.txt");
 }
 ```
